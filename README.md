@@ -1,94 +1,120 @@
-Вот пример README для твоего скрипта на GitHub — лаконично и понятно:
+import requests
+from bs4 import BeautifulSoup
+from collections import deque
+from urllib.parse import urlparse, urljoin
+import time
 
----
+# Лимит запросов в секунду
+RATE_LIMIT_PER_SECOND = 10
 
-# Wikipedia Six Degrees of Separation Checker
+def fetch_page(url):
+    """Загрузка страницы"""
+    try:
+        print(f"[DEBUG]: Загрузка страницы {url}")
+        response = requests.get(url)
+        if response.status_code != 200:
+            raise Exception(f'Ошибка HTTP {response.status_code}')
+        return response.text
+    except Exception as e:
+        print(f'[ERROR]: Ошибка загрузки страницы {url}: {e}')
+        return None
 
-This Python script checks the "Six Degrees of Separation" theory on Wikipedia by finding a chain of Wikipedia article links connecting two given articles.
+def extract_links(soup, base_url):
+    """
+    Извлечение внутренних ссылок на вики-статьи
+    """
+    links = set()
+    for link in soup.find_all('a', href=True):
+        href = link['href']
+        full_link = urljoin(base_url, href)
+        if '/wiki/' in href and ':' not in href.split('/')[-1]:
+            links.add(full_link)
 
----
+    print(f"[DEBUG]: Количество извлечённых ссылок: {len(links)}")
+    return list(links)
 
-## Description
+def advanced_bfs(start_url, target_url, rate_limit_per_second):
+    """
+    Поиск кратчайшего пути между двумя страницами методом BFS с продвинутым контролем очереди
+    """
+    MAX_QUEUE_SIZE = 1000                  # Максимальный размер очереди
+    MAX_DEPTH = 5                           # Максимально допустимый уровень глубины
+    queue = deque([[start_url]])            # Очередь поиска начинается с начальной страницы
+    visited_pages = set()                    # Посещённые страницы
+    iteration_count = 0                      # Текущий номер итерации
 
-The script analyzes links in the main content and the References section of Wikipedia articles (on the same language Wikipedia) and attempts to find a path of up to 5 clicks connecting two articles:
+    while queue:
+        iteration_count += 1
+        path = queue.popleft()
+        current_url = path[-1]
+        depth = len(path) - 1                # Первый узел — нулевого уровня
 
-* Both input URLs must be from the same Wikipedia language edition.
-* Only considers links within the main content and references.
-* Only follows links to other Wikipedia articles of the same language.
-* Implements rate limiting to avoid making more than a specified number of requests per second.
-* Searches both from `url1` to `url2` and from `url2` to `url1`.
+        # Если достигнут максимальный уровень глубины, прекращаем
+        if depth >= MAX_DEPTH:
+            continue
 
----
+        # Отчёты о ходе поиска
+        print(f"[DEBUG]: Итерация #{iteration_count}, Глубина {depth}, Очередь имеет длину {len(queue)}, Исследование страницы {current_url}")
 
-## Usage
+        # Если страница уже была посещена, пропускаем её
+        if current_url in visited_pages:
+            continue
 
-1. Clone the repository or download the script file:
+        # Фиксируем факт посещения страницы
+        visited_pages.add(current_url)
 
-```bash
-git clone <your-repo-url>
-cd <repo-folder>
-```
+        # Загружаем страницу и проверяем результат
+        page_html = fetch_page(current_url)
+        if page_html is None:
+            continue
 
-2. Run the script:
+        # Анализируем страницу и извлекаем ссылки
+        soup = BeautifulSoup(page_html, 'lxml')
+        links = extract_links(soup, start_url)
 
-```bash
-python wiki_six_degrees.py
-```
+        # Пауза между запросами
+        time.sleep(1 / rate_limit_per_second)
 
-3. Enter the input values when prompted:
+        for next_url in links:
+            if next_url in visited_pages:
+                continue
 
-* First Wikipedia article URL (e.g. `https://en.wikipedia.org/wiki/Six_degrees_of_separation`)
-* Second Wikipedia article URL (e.g. `https://en.wikipedia.org/wiki/American_Broadcasting_Company`)
-* Rate limit (max requests per second, e.g. `10`)
+            new_path = list(path)
+            new_path.append(next_url)
 
-4. The script will output the found path(s) or inform if no path was found within 5 hops.
+            if next_url == target_url:
+                return new_path
 
----
+            queue.append(new_path)
 
-## Example
+            # Если очередь становится слишком большой, отрезаем её до приемлемых размеров
+            if len(queue) > MAX_QUEUE_SIZE:
+                print(f"[WARNING]: Очередь превысила допустимый размер ({MAX_QUEUE_SIZE}), проводим сокращение.")
+                queue = deque(list(queue)[len(queue)-MAX_QUEUE_SIZE:])
 
-**Input:**
+    return []  # Возвращаем пустой список, если путь не найден
 
-```
-https://en.wikipedia.org/wiki/Six_degrees_of_separation
-https://en.wikipedia.org/wiki/American_Broadcasting_Company
-10
-```
+if __name__ == "__main__":
+    start_url = input("Введите начальную ссылку: ").strip()
+    end_url = input("Введите конечную ссылку: ").strip()
+    rate_limit_input = input("Укажите лимит запросов в секунду: ").strip()
 
-**Output:**
+    try:
+        rate_limit = int(rate_limit_input)
+    except ValueError:
+        print("Некорректный ввод для лимита запросов. Используйте целое число.")
+        exit(1)
 
-```
-https://en.wikipedia.org/wiki/American_Broadcasting_Company => [https://en.wikipedia.org/wiki/...] => https://en.wikipedia.org/wiki/Six_degrees_of_separation
-https://en.wikipedia.org/wiki/Six_degrees_of_separation => [https://en.wikipedia.org/wiki/...] => https://en.wikipedia.org/wiki/American_Broadcasting_Company
-```
+    # Основной поиск путей
+    print("[INFO]: Начинаем поиск пути...")
+    result_forward = advanced_bfs(start_url, end_url, rate_limit)
+    result_backward = advanced_bfs(end_url, start_url, rate_limit)
+    if result_forward:
+        print(f"{start_url} -> {' -> '.join(result_forward)}")
+    else:
+        print(f"Путь от {start_url} до {end_url} не найден.")
 
----
-
-## Requirements
-
-* Python 3.x
-* `requests` library
-* `beautifulsoup4` library
-
-Install dependencies with:
-
-```bash
-pip install requests beautifulsoup4
-```
-
----
-
-## Notes
-
-* The script respects rate limiting to avoid overloading Wikipedia servers.
-* Only Wikipedia internal links (starting with `/wiki/` and without colons or anchors) are followed.
-* Paths longer than 5 clicks are not considered.
-* Works only with articles from the same language Wikipedia.
-
----
-
-## License
-
-MIT License
-
-
+    if result_backward:
+        print(f"{end_url} -> {' -> '.join(result_backward)}")
+    else:
+        print(f"Путь от {end_url} до {start_url} не найден.")
