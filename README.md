@@ -109,6 +109,7 @@ if __name__ == "__main__":
     print("[INFO]: Начинаем поиск пути...")
     result_forward = advanced_bfs(start_url, end_url, rate_limit)
     result_backward = advanced_bfs(end_url, start_url, rate_limit)
+
     if result_forward:
         print(f"{start_url} -> {' -> '.join(result_forward)}")
     else:
